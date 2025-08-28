@@ -170,7 +170,6 @@ def gpu_supports_nvenc_nvdec():
 def merge_video_audio(video_path, audio_path, output_path):
     nvenc, _ = gpu_supports_nvenc_nvdec()
 
-    # Probe video codec
     try:
         codec_name = subprocess.check_output([FFPROBE_PATH, '-v', 'error', '-select_streams', 'v:0',
                                              '-show_entries', 'stream=codec_name', '-of', 'default=noprint_wrappers=1:nokey=1',
@@ -178,13 +177,11 @@ def merge_video_audio(video_path, audio_path, output_path):
     except Exception:
         codec_name = None
 
-    # If GPU-friendly, remux
     if nvenc and codec_name in ('h264','hevc'):
         print("GPU-friendly codec detected, remuxing without re-encode...")
         subprocess.run([FFMPEG_PATH, '-y', '-i', video_path, '-i', audio_path, '-c', 'copy', output_path], check=True)
         return
 
-    # Ask user to re-encode or abort
     if nvenc:
         choice = input("Video codec not GPU-friendly. Re-encode with GPU? (y) or try another format? (n): ").strip().lower()
         if choice != 'y':
@@ -197,7 +194,6 @@ def merge_video_audio(video_path, audio_path, output_path):
 
     print(f"Merging video + audio using {'GPU' if nvenc else 'CPU'} encoding...")
 
-    # Thread to print ETA
     stop_thread = False
     total_size_est = os.path.getsize(video_path) + os.path.getsize(audio_path)
     start = time.time()
@@ -228,7 +224,6 @@ def merge_video_audio(video_path, audio_path, output_path):
 def download_video_audio(url, video_fmt, do_audio, do_join, target_dir, video_only=False):
     os.makedirs(target_dir, exist_ok=True)
 
-    # Extract video info for title
     with YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
         info_dict = ydl.extract_info(url, download=False)
         video_title = info_dict.get('title', 'video').replace('/', '_').replace('\\', '_')
@@ -238,13 +233,11 @@ def download_video_audio(url, video_fmt, do_audio, do_join, target_dir, video_on
         temp_audio = os.path.join(target_dir, 'temp_audio.m4a')
         final_output = os.path.join(target_dir, f"{video_title}.mp4")
 
-        # Download video
         ydl_opts_video = {'format': video_fmt['format_id'], 'outtmpl': temp_video, 'quiet': False, 'no_warnings': True}
         with YoutubeDL(ydl_opts_video) as ydl:
             ydl.download([url])
 
-        # Download audio
-        ydl_opts_audio = {'format': 'bestaudio[ext=m4a]/bestaudio', 'outtmpl': temp_audio, 'quiet': False, 'no_warnings': True}
+        ydl_opts_audio = {'format': 'bestaudio/best', 'outtmpl': temp_audio, 'quiet': False, 'no_warnings': True}
         with YoutubeDL(ydl_opts_audio) as ydl:
             ydl.download([url])
 
@@ -259,23 +252,25 @@ def download_video_audio(url, video_fmt, do_audio, do_join, target_dir, video_on
             ydl.download([url])
 
     elif do_audio and not video_only:
-        temp_audio = os.path.join(target_dir, f"{video_title}.m4a")
-        wav_output = os.path.join(target_dir, f"{video_title}.wav")  # <-- new wav output
-
+        final_output = os.path.join(target_dir, f"{video_title}.wav")
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': temp_audio,
+            'format': 'bestaudio/best',  # pick best available audio format
+            'outtmpl': os.path.join(target_dir, f"{video_title}.%(ext)s"),
             'quiet': False,
             'no_warnings': True,
+            'postprocessors': [
+                {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'wav',  # convert to WAV
+                    'preferredquality': '0',  # best quality
+                },
+            ],
+            'prefer_ffmpeg': True,
+            'final_ext': 'wav',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',  # avoid 403
         }
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-
-        # Convert to WAV (96kHz) for Resolve
-        print(f"Converting {temp_audio} → {wav_output} (96kHz WAV)...")
-        subprocess.run([FFMPEG_PATH, '-y', '-i', temp_audio, '-ar', '96000', '-sample_fmt', 's24le', wav_output], check=True)
-        os.remove(temp_audio)
-        print("Conversion complete.")
 
 def rename_folder(target_dir):
     files = os.listdir(target_dir)
@@ -293,7 +288,6 @@ def rename_folder(target_dir):
     print(f"Renamed folder to: {new_folder_path}")
 
 def main():
-
     url = input("Paste YouTube URL: ").strip()
     
     choice = None
