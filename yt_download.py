@@ -259,10 +259,23 @@ def download_video_audio(url, video_fmt, do_audio, do_join, target_dir, video_on
             ydl.download([url])
 
     elif do_audio and not video_only:
-        outtmpl = os.path.join(target_dir, f"{video_title}.%(ext)s")
-        ydl_opts = {'format': 'bestaudio[ext=m4a]/bestaudio', 'outtmpl': outtmpl, 'quiet': False, 'no_warnings': True}
+        temp_audio = os.path.join(target_dir, f"{video_title}.m4a")
+        wav_output = os.path.join(target_dir, f"{video_title}.wav")  # <-- new wav output
+
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': temp_audio,
+            'quiet': False,
+            'no_warnings': True,
+        }
         with YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+
+        # Convert to WAV (96kHz) for Resolve
+        print(f"Converting {temp_audio} → {wav_output} (96kHz WAV)...")
+        subprocess.run([FFMPEG_PATH, '-y', '-i', temp_audio, '-ar', '96000', '-sample_fmt', 's24le', wav_output], check=True)
+        os.remove(temp_audio)
+        print("Conversion complete.")
 
 def rename_folder(target_dir):
     files = os.listdir(target_dir)
